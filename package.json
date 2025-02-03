@@ -1,8 +1,8 @@
 {
-  "name": "pipeline-lambda",
+  "name": "my-pipeline",
   "version": "0.1.0",
   "bin": {
-    "pipeline-lambda": "bin/pipeline-lambda.js"
+    "my-pipeline": "bin/my-pipeline.js"
   },
   "scripts": {
     "build": "tsc",

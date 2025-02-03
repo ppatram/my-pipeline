@@ -1,13 +1,13 @@
 // import * as cdk from 'aws-cdk-lib';
 // import { Template } from 'aws-cdk-lib/assertions';
-// import * as PipelineLambda from '../lib/pipeline-lambda-stack';
+// import * as MyPipeline from '../lib/my-pipeline-stack';
 
 // example test. To run these tests, uncomment this file along with the
-// example resource in lib/pipeline-lambda-stack.ts
+// example resource in lib/my-pipeline-stack.ts
 test('SQS Queue Created', () => {
 //   const app = new cdk.App();
 //     // WHEN
-//   const stack = new PipelineLambda.PipelineLambdaStack(app, 'MyTestStack');
+//   const stack = new MyPipeline.MyPipelineStack(app, 'MyTestStack');
 //     // THEN
 //   const template = Template.fromStack(stack);
 
