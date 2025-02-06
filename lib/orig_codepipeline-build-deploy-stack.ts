@@ -15,8 +15,7 @@ import * as path from "path";
 import * as fs from 'fs';
 import { Asset } from 'aws-cdk-lib/aws-s3-assets';
 import { IgnoreMode } from 'aws-cdk-lib';
-import * as github from 'aws-cdk-lib/aws-codepipeline-actions';
-import * as secrets from 'aws-cdk-lib/aws-secretsmanager';
+
 
 
 export class CodepipelineBuildDeployStack extends cdk.Stack {
@@ -37,20 +36,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     });
 
 
-    const gitHubToken = cdk.SecretValue.secretsManager('github-token');
-    
-    const codeRepo = new github.GitHubSourceAction({
-      owner: 'ppatram',
-      repo: 'my-pipeline',
-      branch: 'main',
-      actionName: 'gitHubSource',
-      oauthToken:  gitHubToken,
-      output: new pipeline.Artifact(),
-      runOrder: 1,
-      //trigger: github.GitHubTrigger.WEBHOOK
-       });
 
-    
 
     // Creates an Elastic Container Registry (ECR) image repository
     const imageRepo = new ecr.Repository(this, "imageRepo");
@@ -67,103 +53,18 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     });
 
 
-    // CodeBuild project that builds the Docker image
-    const buildImage = new codebuild.Project(this, "BuildImage", {
-      buildSpec: codebuild.BuildSpec.fromSourceFilename("app/buildspec.yaml"),
-      source: codebuild.Source.gitHub({
-        owner: 'ppatram',
-        repo: 'my-pipeline'
-      }),
-      environment: {
-        privileged: true,
-        environmentVariables: {
-          AWS_ACCOUNT_ID: { value: process.env?.CDK_DEFAULT_ACCOUNT || "" },
-          REGION: { value: process.env?.CDK_DEFAULT_REGION || "" },
-          IMAGE_TAG: { value: "latest" },
-          IMAGE_REPO_NAME: { value: imageRepo.repositoryName },
-          REPOSITORY_URI: { value: imageRepo.repositoryUri },
-          TASK_DEFINITION_ARN: { value: fargateTaskDef.taskDefinitionArn },
-          TASK_ROLE_ARN: { value: fargateTaskDef.taskRole.roleArn },
-          EXECUTION_ROLE_ARN: { value: fargateTaskDef.executionRole?.roleArn },
-        },
-      },
-    });
-    
-    // CodeBuild project that builds the Docker image
-    const buildTest = new codebuild.Project(this, "BuildTest", {
-      buildSpec: codebuild.BuildSpec.fromSourceFilename("buildspec.yaml"),
-      source: codebuild.Source.gitHub({
-        owner: 'ppatram',
-        repo: 'my-pipeline'
-      }),
-      environment: {
-        buildImage: codebuild.LinuxBuildImage.AMAZON_LINUX_2_4,  
-      }
-    });
 
-    // Grants CodeBuild project access to pull/push images from/to ECR repo
-    imageRepo.grantPullPush(buildImage);
 
-    // Lambda function that triggers CodeBuild image build project
-    const triggerCodeBuild = new lambda.Function(this, "BuildLambda", {
-      architecture: lambda.Architecture.ARM_64,
-      code: lambda.Code.fromAsset("./lambda"),
-      handler: "trigger-build.handler",
-      runtime: lambda.Runtime.NODEJS_18_X,
-      environment: {
-        REGION: process.env.CDK_DEFAULT_REGION!,
-        CODEBUILD_PROJECT_NAME: buildImage.projectName,
-      },
-      // Allows this Lambda function to trigger the buildImage CodeBuild project
-      initialPolicy: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ["codebuild:StartBuild"],
-          resources: [buildImage.projectArn],
-        }),
-      ],
-    });
 
-    // Triggers a Lambda function using AWS SDK
-    const triggerLambda = new custom.AwsCustomResource(
-      this,
-      "BuildLambdaTrigger",
-      {
-        installLatestAwsSdk: true,
-        policy: custom.AwsCustomResourcePolicy.fromStatements([
-          new iam.PolicyStatement({
-            effect: iam.Effect.ALLOW,
-            actions: ["lambda:InvokeFunction"],
-            resources: [triggerCodeBuild.functionArn],
-          }),
-        ]),
-        onCreate: {
-          service: "Lambda",
-          action: "invoke",
-          physicalResourceId: custom.PhysicalResourceId.of("id"),
-          parameters: {
-            FunctionName: triggerCodeBuild.functionName,
-            InvocationType: "Event",
-          },
-        },
-        onUpdate: {
-          service: "Lambda",
-          action: "invoke",
-          parameters: {
-            FunctionName: triggerCodeBuild.functionName,
-            InvocationType: "Event",
-          },
-        },
-      }
-    );
+
+
 
     // Creates VPC for the ECS Cluster
     const clusterVpc = new ec2.Vpc(this, "ClusterVpc", {
       ipAddresses: ec2.IpAddresses.cidr("10.50.0.0/16"),
     });
 
-    // Deploys the cluster VPC after the initial image build triggers
-    clusterVpc.node.addDependency(triggerLambda);
+
 
     // Creates a new blue Target Group that routes traffic from the public Application Load Balancer (ALB) to the
     // registered targets within the Target Group e.g. (EC2 instances, IP addresses, Lambda functions)
@@ -239,60 +140,109 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     //----------------------! do this later?
 */
 
+
+//------------------------------  Begin Pipeline Code ---------------------------//
     // Creates new pipeline artifacts
     const sourceArtifact = new pipeline.Artifact("SourceArtifact");
     const buildArtifact = new pipeline.Artifact("BuildArtifact");
 
+    const githubSourceAction= new pipelineactions.CodeStarConnectionsSourceAction({
+      actionName: 'githubSourceAction',
+      connectionArn: 'arn:aws:codeconnections:us-east-1:676206914581:connection/38a41c14-fcf2-44f5-8784-908f4c33cc4d',
+      owner: 'ppatram',
+      repo: 'my-pipeline',
+      branch: 'main',
+      output: new pipeline.Artifact("SourceArtifact"),
+      triggerOnPush: true,
+    });
+
     // Creates the source stage for CodePipeline
     const sourceStage = {
       stageName: "Source",
-      actions: [
-        new pipelineactions.GitHubSourceAction({
-          actionName: "GitHubSource",
-          owner: 'ppatram',
-          repo: 'my-pipeline',
-          branch: 'main',
-          oauthToken: gitHubToken,
-          output: sourceArtifact
-        }),
-      ],
+      actions: [githubSourceAction],
     };
 
 
+    // CodeBuild project that builds the Docker image
+    const buildProject = new codebuild.Project(this, "buildProject", {
+      buildSpec: codebuild.BuildSpec.fromSourceFilename("app/buildspec.yaml"),
+      source: codebuild.Source.gitHub({
+        owner: 'ppatram',
+        repo: 'my-pipeline'
+      }),
+      environment: {
+        privileged: true,
+        environmentVariables: {
+          AWS_ACCOUNT_ID: { value: process.env?.CDK_DEFAULT_ACCOUNT || "" },
+          REGION: { value: process.env?.CDK_DEFAULT_REGION || "" },
+          IMAGE_TAG: { value: "latest" },
+          IMAGE_REPO_NAME: { value: imageRepo.repositoryName },
+          REPOSITORY_URI: { value: imageRepo.repositoryUri },
+          TASK_DEFINITION_ARN: { value: fargateTaskDef.taskDefinitionArn },
+          TASK_ROLE_ARN: { value: fargateTaskDef.taskRole.roleArn },
+          EXECUTION_ROLE_ARN: { value: fargateTaskDef.executionRole?.roleArn },
+        },
+      },
+    });    
 
-    // Run jest test and send result to CodeBuild    
-    const testStage = {
-      stageName: "Test",
-      actions: [
-        new pipelineactions.CodeBuildAction({
-          actionName: "JestCDK",
-          input: new pipeline.Artifact("SourceArtifact"),
-          project: buildTest,
+    // Lambda function that triggers CodeBuild image build project
+    const triggerCodeBuild = new lambda.Function(this, "BuildLambda", {
+      architecture: lambda.Architecture.ARM_64,
+      code: lambda.Code.fromAsset("./lambda"),
+      handler: "trigger-build.handler",
+      runtime: lambda.Runtime.NODEJS_18_X,
+      environment: {
+        REGION: process.env.CDK_DEFAULT_REGION!,
+        CODEBUILD_PROJECT_NAME: buildProject.projectName,
+      },
+      // Allows this Lambda function to trigger the buildProject CodeBuild project
+      initialPolicy: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["codebuild:StartBuild"],
+          resources: [buildProject.projectArn],
         }),
       ],
-    };
+    })
 
-    // Creates the build stage for CodePipeline
-    const buildStage = {
-      stageName: "Build",
-      actions: [
-        new pipelineactions.CodeBuildAction({
-          actionName: "DockerBuildPush",
-          input: new pipeline.Artifact("SourceArtifact"),
-          project: buildImage,
-          outputs: [buildArtifact],
-        }),
-      ],
-    };
 
-    //----------------------! create blank deployment group
-    const testdeploymentGroup = new codedeploy.ServerDeploymentGroup(this, 'testDeployGroup', {
+    // Triggers a Lambda function using AWS SDK
+    const triggerLambda = new custom.AwsCustomResource(
+      this,
+      "BuildLambdaTrigger",
+      {
+        installLatestAwsSdk: true,
+        policy: custom.AwsCustomResourcePolicy.fromStatements([
+          new iam.PolicyStatement({
+            effect: iam.Effect.ALLOW,
+            actions: ["lambda:InvokeFunction"],
+            resources: [triggerCodeBuild.functionArn],
+          }),
+        ]),
+        onCreate: {
+          service: "Lambda",
+          action: "invoke",
+          physicalResourceId: custom.PhysicalResourceId.of("id"),
+          parameters: {
+            FunctionName: triggerCodeBuild.functionName,
+            InvocationType: "Event",
+          },
+        },
+        onUpdate: {
+          service: "Lambda",
+          action: "invoke",
+          parameters: {
+            FunctionName: triggerCodeBuild.functionName,
+            InvocationType: "Event",
+          },
+        },
+      }
+    );
 
-    });
-
+    // Deploys the cluster VPC after the initial image build triggers
+    clusterVpc.node.addDependency(triggerLambda);
+        
 /*
-    //----------------------! do this later?
-
     // Creates a new CodeDeploy Deployment Group
     const deploymentGroup = new codedeploy.EcsDeploymentGroup(
       this,
@@ -307,8 +257,36 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
         },
       }
     );
-    //----------------------! do this later?
 */
+    // Creates the build stage for CodePipeline
+    const buildStage = {
+      stageName: "Build",
+      actions: [
+        new pipelineactions.CodeBuildAction({
+          actionName: "DockerBuildPush",
+          input: new pipeline.Artifact("SourceArtifact"),
+          project: buildProject,
+          outputs: [buildArtifact],
+        }),
+      ],
+    };    
+
+    // Run jest test and send result to CodeBuild    
+    const testStage = {
+      stageName: "Test",
+      actions: [
+        new pipelineactions.CodeBuildAction({
+          actionName: "JestCDK",
+          input: new pipeline.Artifact("SourceArtifact"),
+          project: buildProject,
+        }),
+      ],
+    };
+
+    // Grants CodeBuild project access to pull/push images from/to ECR repo
+    imageRepo.grantPullPush(buildProject);
+
+/*
     // Creates the deploy stage for CodePipeline
     const deployStage = {
       stageName: "Deploy",
@@ -322,12 +300,18 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
         }),
       ],
     };
-
+*/
     // Creates an AWS CodePipeline with source, build, and deploy stages
     new pipeline.Pipeline(this, "BuildDeployPipeline", {
       pipelineName: "ImageBuildDeployPipeline",
-      stages: [sourceStage, testStage, buildStage, deployStage],
+      //stages: [sourceStage, testStage, buildStage, deployStage],
+      stages: [sourceStage, testStage, buildStage],
     });
+
+
+
+
+//------------------------------  End Pipeline Code ---------------------------//
 
     // Outputs the ALB public endpoint
     new cdk.CfnOutput(this, "PublicAlbEndpoint", {
