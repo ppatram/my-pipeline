@@ -18,7 +18,7 @@ import { IgnoreMode } from 'aws-cdk-lib';
 
 
 
-export class CodepipelineBuildDeployStack extends cdk.Stack {
+export class CodepipelineBuildDeployStack1 extends cdk.Stack {
   
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
@@ -118,7 +118,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
       defaultTargetGroups: [targetGroupBlue],
     });
 
-/*
+
     //----------------------! do this later?
     // Creates an ECS Fargate service
     const fargateService = new ecs.FargateService(this, "FargateService", {
@@ -138,7 +138,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     // Adds the ECS Fargate service to the ALB target group
     fargateService.attachToApplicationTargetGroup(targetGroupBlue);
     //----------------------! do this later?
-*/
+
 
 
 //------------------------------  Begin Pipeline Code ---------------------------//
@@ -242,7 +242,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     // Deploys the cluster VPC after the initial image build triggers
     clusterVpc.node.addDependency(triggerLambda);
         
-/*
+
     // Creates a new CodeDeploy Deployment Group
     const deploymentGroup = new codedeploy.EcsDeploymentGroup(
       this,
@@ -257,7 +257,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
         },
       }
     );
-*/
+
     // Creates the build stage for CodePipeline
     const buildStage = {
       stageName: "Build",
@@ -286,7 +286,7 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
     // Grants CodeBuild project access to pull/push images from/to ECR repo
     imageRepo.grantPullPush(buildProject);
 
-/*
+
     // Creates the deploy stage for CodePipeline
     const deployStage = {
       stageName: "Deploy",
@@ -296,16 +296,16 @@ export class CodepipelineBuildDeployStack extends cdk.Stack {
           appSpecTemplateInput: buildArtifact,
           taskDefinitionTemplateInput: buildArtifact,
           //----------------------! change this back to 'deploymentGroup'
-          deploymentGroup: testdeploymentGroup,
+          deploymentGroup: deploymentGroup,
         }),
       ],
     };
-*/
+
     // Creates an AWS CodePipeline with source, build, and deploy stages
     new pipeline.Pipeline(this, "BuildDeployPipeline", {
       pipelineName: "ImageBuildDeployPipeline",
-      //stages: [sourceStage, testStage, buildStage, deployStage],
-      stages: [sourceStage, testStage, buildStage],
+      stages: [sourceStage, testStage, buildStage, deployStage],
+      //stages: [sourceStage, testStage, buildStage],
     });
 
 

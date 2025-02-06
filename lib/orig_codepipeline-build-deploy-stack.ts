@@ -18,7 +18,7 @@ import { IgnoreMode } from 'aws-cdk-lib';
 
 
 
-export class CodepipelineBuildDeployStack extends cdk.Stack {
+export class CodepipelineBuildDeployStack1 extends cdk.Stack {
   
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
